@@ -1,4 +1,4 @@
-Data needed in Raw folder (files marked as "World Bank" are not public):  
+Data needed to replicate our findings are not included (files marked as "World Bank" are not public):  
 GDP_grid_flt.tif (https://ngdc.noaa.gov/eog/dmsp/download_gdp.html)  
 g2014_2015_2.geojson (World Bank)   
 public_officials_indicators_data (R Workspace - World Bank)  
