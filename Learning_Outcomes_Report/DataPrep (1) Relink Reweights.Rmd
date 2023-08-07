@@ -1,0 +1,474 @@
+---
+title: "GEPD Geospatial Admin Linkaged"
+author: "Originally: Brian Stacy Edited By: Kiran Ferrini"
+date: "11/5/2021 Edited 5/22/2023"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(sf)
+sf::sf_use_s2(FALSE)
+library(rnaturalearth)
+library(rnaturalearthdata)
+library(ggthemes)
+library(patchwork)
+library(haven)
+library(stringr)
+
+
+#cnt_map <- ne_countries(country="Peru", scale = "medium", returnclass = "sf", type='map_units')
+
+
+#set directory to bring in data
+country <-'SLE'
+country_name <- "Sierra Leone"
+year <- '2022'
+
+#DIRECTORIES: EDIT BASED ON PERSONAL USE
+raw_folder <- "D:/LO_Code/Raw"
+save_folder <- "D:/LO_Code/Output"
+
+# load the world bank admin boundaries
+load(file.path(raw_folder, "WB_admin_boundaries.RData"))
+
+# load the public officials data
+load(file.path(raw_folder, "public_officials_indicators_data.RData"))
+
+# load the school data
+load(file.path(raw_folder, "school_survey_data.RData"))
+
+
+keyfile <- read_csv(file.path(raw_folder, "EPDash_linkfile_hashed.csv"))
+
+#get list of indicators
+
+    sch_ind_list<-c('student_knowledge', 'math_student_knowledge', 'literacy_student_knowledge', 'student_proficient','student_proficient_nogiraffe',  'literacy_student_proficient_nogiraffe', 'literacy_student_proficient', 'math_student_proficient', 'student_proficient_70',  'student_proficient_75',
+                'student_attendance',
+                'presence_rate',  'absence_rate', 'sch_absence_rate', 
+                'content_proficiency', 'literacy_content_proficiency', 'math_content_proficiency', 'content_proficiency_70', 'content_proficiency_75', 'content_knowledge', 'math_content_knowledge', 'literacy_content_knowledge', 'grammar', 'cloze',  'read_passage', 'arithmetic_number_relations', 'geometry', 'interpret_data',
+                'teach_score','classroom_culture','instruction','socio_emotional_skills',
+                'teach_prof','classroom_culture_prof','instruction_prof','socio_emotional_skills_prof', 'timeontask1',
+                'ecd_student_knowledge', 'ecd_math_student_knowledge', 'ecd_literacy_student_knowledge', 'ecd_exec_student_knowledge', 'ecd_soc_student_knowledge',
+                'ecd_student_proficiency', 'ecd_math_student_proficiency', 'ecd_literacy_student_proficiency', 'ecd_exec_student_proficiency', 'ecd_soc_student_proficiency',
+                'inputs', 'blackboard_functional', 'pens_etc','textbooks', 'share_desk', 'used_ict', 'access_ict',
+                'infrastructure','drinking_water', 'functioning_toilet', 'internet', 'class_electricity','disability_accessibility',
+                'operational_management', 'vignette_1',  'vignette_2', 
+                'intrinsic_motivation', 'acceptable_absent', 'students_deserve_attention', 'growth_mindset', 'motivation_teaching',
+                'instructional_leadership', 'classroom_observed', 'classroom_observed_recent', 'discussed_observation', 'feedback_observation', 'lesson_plan_w_feedback',
+                'principal_knowledge_score', 'add_triple_digit_pknw', 'multiply_double_digit_pknw', 'complete_sentence_pknw', 'experience_pknw', 'textbooks_pknw', 'blackboard_pknw',
+                'principal_management', 'sch_goals_exist','sch_goals_clear','sch_goals_relevant','sch_goals_measured',
+                'teacher_attraction', 'teacher_satisfied_job', 'teacher_satisfied_status', 'better_teachers_promoted' ,'teacher_bonus', 'salary_delays',
+                'teacher_selection_deployment', 'teacher_selection','teacher_deployment',
+                'teacher_support', 'pre_service','practicum','in_service','opportunities_teachers_share',
+                'teaching_evaluation', 'formally_evaluated', 'evaluation_content', 'negative_consequences','positive_consequences',
+                'teacher_monitoring','attendance_evaluated' , 'attendance_rewarded' , 'attendence_sanctions', 'miss_class_admin',
+                'standards_monitoring',
+                'sch_monitoring', 'monitoring_inputs','monitoring_infrastructure','parents_involved',
+                'sch_management_clarity', 'infrastructure_scfn','materials_scfn','hiring_scfn', 'supervision_scfn', 'student_scfn' , 'principal_hiring_scfn', 'principal_supervision_scfn',
+                'sch_management_attraction', 'principal_satisfaction', 'principal_salary',
+                'sch_selection_deployment', 
+                'sch_support', 'prinicipal_trained','principal_training','principal_used_skills','principal_offered',
+                'principal_evaluation', 'principal_formally_evaluated','principal_evaluation_multiple','principal_negative_consequences','principal_positive_consequences')
+    
+po_ind_list<- c(
+                'national_learning_goals', 'targeting', 'monitoring', 'incentives', 'community_engagement',
+                'mandates_accountability' , 'coherence', 'transparency', 'accountability', 
+                'quality_bureaucracy', 'knowledge_skills', 'work_environment', 'merit', 'motivation_attitudes','motivation_relative_start',
+                'impartial_decision_making','politicized_personnel_management', 'politicized_policy_making', 'politicized_policy_implementation', 'employee_unions_as_facilitators', 'bureaucratic_efficiency'
+    )
+
+# create "big" indicator
+public_officials_dta_clean <- public_officials_dta_clean %>%
+  mutate(bureaucratic_efficiency = 
+           rowMeans(dplyr::select(., grep("NLG|ACM|QB|IDM", colnames(.))), na.rm = TRUE))
+
+
+```
+
+
+## Introduction
+
+This file will read in the World Bank spatial polygon files containing the admin1 and admin2 boundaries for all countries. It will then read in the lat/long data in the GEPD school and public officials files and match them to the official admin1 and admin2 boundaries.  This information will then be saved.
+
+```{r geojson_prelim}
+
+library(geojsonsf) # reads large .geojson files as sf objects much faster than sf's st_read()
+# load wb polygon data 
+
+## import at district level (adm2 level)
+wb.poly.2 <- geojson_sf(
+  file.path(raw_folder, "g2015_2014_2.geojson") # where _2 has district level polys
+  ) %>%
+  filter( ADM0_NAME == country_name) %>%
+  distinct(ADM2_CODE, ADM1_CODE, ADM0_CODE, .keep_all = TRUE)  # remove any possible duplicates
+
+# ## import at district level (adm1 level)
+# geo1 <- geojson_sf(
+#   file.path(wbgis, "GeoJSON/g2015_2014_1.geojson") # where _1 has region-level polys
+#   ) %>%
+#   filter( ADM0_NAME == country_name) %>%
+#   distinct(ADM1_CODE, ADM0_CODE, .keep_all = TRUE)  # remove any possible duplicates
+# 
+# ## keep only the adm0 code and the geometry column.
+# geo1 <- geo1 %>%
+#   select(ADM1_CODE, geometry)
+
+
+
+```
+
+```{r linkages}
+
+m.po <- public_officials_dta_clean
+m.school <- school_dta_short
+
+#get coordinates
+po_coord_df <- public_officials_dta_clean %>%
+  dplyr::select(interview__id, lat, lon) %>%
+  rename(office_lat=lat,
+         office_lon=lon)
+
+school_coord_df <- school_dta_short %>%
+  dplyr::select(school_code, lat, lon) %>%
+  rename(school_lat=lat,
+         school_lon=lon) 
+
+# convert po + school dataset to sf objects
+po <- st_as_sf(m.po,
+               coords = c("lon", "lat"), # set geometry/point column first
+               na.fail = FALSE)
+
+school <- st_as_sf(m.school,
+                   coords = c("lon", "lat"),
+                   na.fail = FALSE)
+
+
+
+# set the crs of school + po as the same as the world poly crs
+st_crs(po) <- st_crs(wb.poly.2)
+st_crs(school) <- st_crs(wb.poly.2)
+
+st_is_longlat(po)
+st_is_longlat(school)
+
+
+
+# set the variable order
+order <- c("ADM0_NAME", "ADM1_NAME", "ADM2_NAME",
+           "ADM0_CODE", "ADM1_CODE", "ADM2_CODE")
+
+
+
+# - - - - - - - - -  join poly and po datasets - - - - - - - - -
+# note, this is very important to see that the datasets will be
+# joined NOT by the region or dsitrict -level polygon datasets, but
+# instead the will be joined by the dataset that defines the polygons
+# by the decision-making level
+
+main_po_data <- st_join(po, # points
+                        wb.poly.2, #polys
+                        largest = TRUE) %>%
+  dplyr::select( interview__id,  order, everything())
+
+
+# join poly and school datasets: should be joing with wb.poly.2 since schools don't apply to dm level
+main_school_data <- st_join(school, # points
+                            wb.poly.2, #polys
+                            largest = TRUE) %>%
+  dplyr::select(school_code, order, everything())
+```
+
+
+Merge the school and PO data
+
+```{r}
+#district linkages
+po_district_df <- main_po_data %>%
+  left_join(po_coord_df) %>%
+  filter(govt_tier=='District office (or equivalent)') %>%
+  group_by(ADM2_NAME, ADM2_CODE) %>%
+    summarise(across(.cols = all_of(po_ind_list), .fns = ~ mean(., na.rm = TRUE)), 
+            across(.cols = c(office_lat, office_lon), .fns = first)) %>% 
+  as_tibble() %>%
+  dplyr::select(-geometry) %>%
+  filter(!is.na(ADM2_NAME))
+
+linked_school_data <- main_school_data %>%
+  left_join(school_coord_df) %>%
+  left_join(po_district_df) 
+  #filter(!is.na(quality_bureaucracy))
+
+#write to csv
+# linked_school_data_csv <- linked_school_data %>%
+#   as_tibble() %>% 
+#   ungroup() %>%
+#   select(-geometry) %>%
+#   left_join(keyfile) %>%
+#   select(hashed_school_code, ADM0_NAME, ADM1_NAME, ADM2_NAME, school_lat, school_lon, colnames(po_district_df)) 
+# 
+# write_excel_csv(linked_school_data_csv, paste0(save_folder, "linked_po_school_data_",country,".csv"))
+library(Hmisc)
+po_district_df_cw <- main_po_data %>%
+  left_join(po_coord_df) %>%
+  filter(govt_tier=='District office (or equivalent)') %>%
+  group_by(ADM2_NAME, ADM2_CODE) %>%
+  summarise(across(.cols = all_of(po_ind_list), .fns = ~ wtd.mean(.,weights=ENUMq4, na.rm = TRUE)), 
+            across(.cols = c(office_lat, office_lon), .fns = first)) %>% 
+  as_tibble() %>%
+  dplyr::select(-geometry) %>%
+  filter(!is.na(ADM2_NAME)) %>% 
+  rename_with(~ str_replace(., pattern = paste0("(", paste(po_ind_list, collapse = "|"), ")"), replacement = "\\1_cw"))
+
+linked_school_data_cw <- main_school_data %>%
+  left_join(school_coord_df) %>%
+  left_join(po_district_df_cw) 
+  #filter(!is.na(quality_bureaucracy))
+
+#merge original weights with new weights
+linked_school_data <- as.data.frame(st_drop_geometry(linked_school_data))
+linked_school_data_cw <- as.data.frame(st_drop_geometry(linked_school_data_cw))
+
+linked_school_data <- left_join(linked_school_data, linked_school_data_cw, by = "school_code") %>% 
+  dplyr::select(-ends_with(".y")) %>%
+  rename_with(~gsub(".x$", "", .))
+```
+
+
+```{r}
+
+quasi_mean <- function(x) {
+  transformed_values <- 1/x  
+  result <- mean(transformed_values, na.rm = TRUE)  
+  return(1/result)
+}
+
+# NLG 
+public_officials_dta_clean <- public_officials_dta_clean %>%
+  mutate(
+    national_learning_goals = apply(dplyr::select(., grep("NLG", colnames(.))), 1, quasi_mean),
+    targeting = apply(dplyr::select(., grep("NLG1", colnames(.))), 1, quasi_mean),
+    monitoring = apply(dplyr::select(., grep("NLG2", colnames(.))), 1, quasi_mean),
+    incentives = apply(dplyr::select(., grep("NLG3", colnames(.))), 1, quasi_mean),
+    community_engagement = apply(dplyr::select(., grep("NLG4", colnames(.))), 1, quasi_mean),
+    
+    mandates_accountability = apply(dplyr::select(., grep("ACM", colnames(.))), 1, quasi_mean),
+    coherence = apply(dplyr::select(., grep("ACM2", colnames(.))), 1, quasi_mean),
+    transparency = apply(dplyr::select(., grep("ACM3", colnames(.))), 1, quasi_mean),
+    accountability = apply(dplyr::select(., grep("ACM4", colnames(.))), 1, quasi_mean),
+    
+    quality_bureaucracy = apply(dplyr::select(., grep("QB", colnames(.))), 1, quasi_mean),
+    knowledge_skills = apply(dplyr::select(., grep("QB1", colnames(.))), 1, quasi_mean),
+    work_environment = apply(dplyr::select(., grep("QB2", colnames(.))), 1, quasi_mean),
+    merit = apply(dplyr::select(., grep("QB3", colnames(.))), 1, quasi_mean),
+    motivation_attitudes = apply(dplyr::select(., grep("QB4", colnames(.))), 1, quasi_mean),
+    
+    impartial_decision_making = apply(dplyr::select(., grep("IDM", colnames(.))), 1, quasi_mean),
+    politicized_personnel_management =
+      apply(dplyr::select(., grep("IDM1", colnames(.))), 1, quasi_mean),
+    politicized_policy_making = apply(dplyr::select(., grep("IDM2", colnames(.))), 1, quasi_mean),
+    politicized_policy_implementation = 
+      apply(dplyr::select(., grep("IDM3", colnames(.))), 1, quasi_mean),
+    employee_unions_as_facilitators = 
+      apply(dplyr::select(., grep("IDM4", colnames(.))), 1, quasi_mean),
+    
+    bureaucratic_efficiency = apply(dplyr::select(., grep("NLG|ACM|QB|IDM", colnames(.))), 1, quasi_mean),
+  )
+
+
+
+```
+
+
+```{r linkages}
+# RELINK NOW THAT THE public_officals_dta_clean has the new weighting scheme
+
+m.po <- public_officials_dta_clean
+m.school <- school_dta_short
+
+#get coordinates
+po_coord_df <- public_officials_dta_clean %>%
+  dplyr::select(interview__id, lat, lon) %>%
+  rename(office_lat=lat,
+         office_lon=lon)
+
+school_coord_df <- school_dta_short %>%
+  dplyr::select(school_code, lat, lon) %>%
+  rename(school_lat=lat,
+         school_lon=lon) 
+
+# convert po + school dataset to sf objects
+po <- st_as_sf(m.po,
+               coords = c("lon", "lat"), # set geometry/point column first
+               na.fail = FALSE)
+
+school <- st_as_sf(m.school,
+                   coords = c("lon", "lat"),
+                   na.fail = FALSE)
+
+
+
+# set the crs of school + po as the same as the world poly crs
+st_crs(po) <- st_crs(wb.poly.2)
+st_crs(school) <- st_crs(wb.poly.2)
+
+st_is_longlat(po)
+st_is_longlat(school)
+
+
+
+# set the variable order
+order <- c("ADM0_NAME", "ADM1_NAME", "ADM2_NAME",
+           "ADM0_CODE", "ADM1_CODE", "ADM2_CODE")
+
+
+
+# - - - - - - - - -  join poly and po datasets - - - - - - - - -
+# note, this is very important to see that the datasets will be
+# joined NOT by the region or dsitrict -level polygon datasets, but
+# instead the will be joined by the dataset that defines the polygons
+# by the decision-making level
+
+main_po_data <- st_join(po, # points
+                        wb.poly.2, #polys
+                        largest = TRUE) %>%
+  dplyr::select( interview__id,  order, everything())
+
+
+# join poly and school datasets: should be joing with wb.poly.2 since schools don't apply to dm level
+main_school_data <- st_join(school, # points
+                            wb.poly.2, #polys
+                            largest = TRUE) %>%
+  dplyr::select(school_code, order, everything())
+```
+
+
+Add the altered indicators 
+
+```{r}
+# Quasi-Mean - Weighted Aggregation
+po_district_df_alt <- main_po_data %>%
+  left_join(po_coord_df) %>%
+  filter(govt_tier=='District office (or equivalent)') %>%
+  group_by(ADM2_NAME, ADM2_CODE) %>%
+  summarise(across(.cols = all_of(po_ind_list), .fns = ~ wtd.mean(.,weights=ENUMq4, na.rm = TRUE)), 
+            across(.cols = c(office_lat, office_lon), .fns = first)) %>% 
+  as_tibble() %>%
+  dplyr::select(-geometry) %>%
+  filter(!is.na(ADM2_NAME)) %>% 
+  rename_with(~ str_replace(., pattern = paste0("(", paste(po_ind_list, collapse = "|"), ")"), replacement = "\\1_alt"))
+
+#  Quasi-Mean - Standard Aggregation
+po_district_df_quas <- main_po_data %>%
+  left_join(po_coord_df) %>%
+  filter(govt_tier=='District office (or equivalent)') %>%
+  group_by(ADM2_NAME, ADM2_CODE) %>%
+  summarise(across(.cols = all_of(po_ind_list), .fns = ~ mean(., na.rm = TRUE)), 
+            across(.cols = c(office_lat, office_lon), .fns = first)) %>% 
+  as_tibble() %>%
+  dplyr::select(-geometry) %>%
+  filter(!is.na(ADM2_NAME)) %>% 
+  rename_with(~ str_replace(., pattern = paste0("(", paste(po_ind_list, collapse = "|"), ")"), replacement = "\\1_quas"))
+
+
+
+
+linked_school_data_alt <- main_school_data %>%
+  left_join(school_coord_df) %>%
+  left_join(po_district_df_alt) %>% 
+  left_join(po_district_df_quas)
+  #filter(!is.na(quality_bureaucracy))
+
+#merge original weights with new weights
+linked_school_data <- as.data.frame(st_drop_geometry(linked_school_data))
+linked_school_data_alt <- as.data.frame(st_drop_geometry(linked_school_data_alt))
+
+data_merged_sle <- left_join(linked_school_data, linked_school_data_alt, by = "school_code") %>% 
+  dplyr::select(-ends_with(".y")) %>%
+  rename_with(~gsub(".x$", "", .))
+  
+data_merged_sle <- data_merged_sle %>% 
+  rename(ppm_alt = politicized_personnel_management_alt) %>% 
+  rename(ppi_alt = politicized_policy_implementation_alt) %>%
+  rename(ppi = politicized_policy_implementation) %>%
+  rename(euaf_alt = employee_unions_as_facilitators_alt) %>%  
+  rename(students_enrolled = total_enrolled)
+  
+data_merged_sle <- data_merged_sle %>%  
+  rowwise() %>%  
+  mutate(bureaucratic_efficiency = mean(c(national_learning_goals, mandates_accountability, quality_bureaucracy, impartial_decision_making)))
+  
+data_merged_sle <- data_merged_sle %>%
+  mutate(across(where(is.list), ~map_chr(., toString)))
+
+# # Identify character columns
+# char_cols <- sapply(data_merged_sle, is.character)
+# 
+# # Replace empty string values with NA for character columns
+# data_merged_sle[, char_cols][data_merged_sle[, char_cols] == ""] <- NA
+# 
+# write_dta(data_merged_sle, file.path(save_folder,"data_merged_sle.dta"))
+```
+
+
+
+
+Adds Light_GDP data
+```{r}
+library(tidyverse)
+library(haven)
+library(terra)
+library(raster)
+library(sf)
+library(foreign)
+library(elevatr)
+
+#import tif and datafile
+str_name <- "D:/LO_Code/Raw/GDP_grid_flt.tif" #input light tif file location
+raster_data = raster(str_name)
+data <- data_merged_sle
+
+#create a new dataframe of lat and long with no NA
+data2 = data.frame('school_code' = data$school_code, 'lon' = data$school_lon, 'lat' = data$school_lat)
+data2 <- na.omit(data2)
+
+
+#convert coords to shapefile object
+coordinates_sf <- st_as_sf(data2, coords = c('lon', 'lat'),
+                           crs = st_crs(raster_data))
+
+#create coordinate pairs
+points <- st_transform(coordinates_sf, st_crs(raster_data))
+
+#match pairs to values
+pixel_values <- extract(raster_data, points)
+
+#restore to coordinates
+data2$light_GDP <- pixel_values
+colnames(data2)[2] = 'school_lat'
+colnames(data2)[3] = 'school_lon'
+
+examp = data2[2:3]
+
+examp_sp <- SpatialPoints(examp, proj4string = CRS("+proj=longlat +datum=WGS84"))
+examp_spdf <- SpatialPointsDataFrame(examp_sp, data = data2)
+df_elev <- get_elev_point(examp_spdf, prj = CRS("+proj=longlat +datum=WGS84"), src = "aws")
+
+df_elev = as.data.frame(df_elev)
+df_elev = df_elev[1:6]
+
+#combine with full data
+merged_df <- merge(data, df_elev, by = 'school_code', all.x = TRUE, sort = FALSE)
+
+#drop meters and repeated school coords
+merged_df = subset(merged_df, select = -c(school_lon.y, school_lat.y, elev_units))
+
+# Replace empty string values with NA
+merged_df[is.na(merged_df)] <- NA
+
+library(openxlsx)
+write.xlsx(merged_df, file.path(save_folder,"sle_merged_altered.xlsx"), rowNames = FALSE)
+```
+
+
