@@ -3,7 +3,7 @@ GDP_grid_flt.tif (https://ngdc.noaa.gov/eog/dmsp/download_gdp.html)
 g2014_2015_2.geojson (World Bank)   
 public_officials_indicators_data (R Workspace - World Bank)  
 school_survey_data (R Workspace - World Bank)  
-WB_admin_boundaries (R Workspace - Wortld Bank)   
+WB_admin_boundaries (R Workspace - World Bank)   
 EPDash_linkfile_hashed.csv (World Bank)  
 
 Data generated:  
